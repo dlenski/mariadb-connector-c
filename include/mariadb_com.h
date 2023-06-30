@@ -176,6 +176,16 @@ enum enum_server_command
 #define MARIADB_CLIENT_EXTENDED_METADATA (1ULL << 35)
 /* Do not resend metadata for prepared statements, since 10.6*/
 #define MARIADB_CLIENT_CACHE_METADATA (1ULL << 36)
+/* Server does not mishandle information sent in the plaintext
+ * login request packet sent prior to the TLS handshake.
+ * Indicates that MDEV-31585 has been fixed. Since ??.?.
+ *
+ * If the server-side bug has been fixed, the client can safely
+ * send a 2-byte dummy packet containing no information other than
+ * the CLIENT_SSL flag which is necessary to trigger the TLS
+ * handshake.
+ */
+#define MARIADB_CLIENT_CAN_SEND_DUMMY_HANDSHAKE_PACKET    (1ULL << 37)
 
 #define IS_MARIADB_EXTENDED_SERVER(mysql)\
         (!(mysql->server_capabilities & CLIENT_MYSQL))
@@ -219,7 +229,8 @@ enum enum_server_command
                                  CLIENT_PLUGIN_AUTH |\
                                  CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA | \
                                  CLIENT_SESSION_TRACKING |\
-                                 CLIENT_CONNECT_ATTRS)
+                                 CLIENT_CONNECT_ATTRS |\
+                                 MARIADB_CLIENT_CAN_SEND_DUMMY_HANDSHAKE_PACKET)
 
 #define CLIENT_DEFAULT_FLAGS ((CLIENT_SUPPORTED_FLAGS & ~CLIENT_COMPRESS)\
                                                       & ~CLIENT_SSL)
