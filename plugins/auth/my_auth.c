@@ -326,7 +326,8 @@ static int send_client_reply_packet(MCPVIO_EXT *mpvio,
       (mysql->client_flag & CLIENT_SSL))
   {
     int ret;
-    if (server_allows_dummy_packet)
+    if (server_allows_dummy_packet
+        || !mysql->options.backwards_compatible_insecure_ssl)
     {
       /*
         The server has been disemborked so that it doesn't inadvisably

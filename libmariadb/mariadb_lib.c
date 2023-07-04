@@ -680,6 +680,7 @@ struct st_default_options mariadb_defaults[] =
   {{MYSQL_SERVER_PUBLIC_KEY}, MARIADB_OPTION_STR, "server-public-key"},
   {{MYSQL_OPT_BIND}, MARIADB_OPTION_STR, "bind-address"},
   {{MYSQL_OPT_SSL_ENFORCE}, MARIADB_OPTION_BOOL, "ssl-enforce"},
+  {{MYSQL_OPT_BACKWARDS_COMPATIBLE_INSECURE_SSL}, MARIADB_OPTION_BOOL, "backwards-compatible-insecure-ssl"},
   {{MARIADB_OPT_RESTRICTED_AUTH}, MARIADB_OPTION_STR, "restricted-auth"},
   {{.option_func=parse_connection_string}, MARIADB_OPTION_FUNC, "connection"},
   /* Aliases */
@@ -699,6 +700,7 @@ struct st_default_options mariadb_defaults[] =
   {{MARIADB_OPT_TLS_PASSPHRASE}, MARIADB_OPTION_STR, "tls-passphrase"},
   {{MYSQL_OPT_SSL_ENFORCE}, MARIADB_OPTION_BOOL, "tls-enforce"},
   {{MYSQL_OPT_SSL_VERIFY_SERVER_CERT}, MARIADB_OPTION_BOOL,"tls-verify-peer"},
+  {{MYSQL_OPT_BACKWARDS_COMPATIBLE_INSECURE_SSL}, MARIADB_OPTION_BOOL, "backwards-compatible-insecure-tls"},
   {{0}, 0, NULL}
 };
 
@@ -1788,15 +1790,33 @@ restart:
   if ((pkt_length=ma_net_safe_read(mysql)) == packet_error)
   {
     if (mysql->options.use_ssl)
-      my_set_error(mysql, CR_CONNECTION_ERROR, SQLSTATE_UNKNOWN,
-                   "Received error packet before completion of TLS handshake. "
-                   "Suppressing its details so that the client cannot vary its behavior "
-                   "based on this UNTRUSTED input.");
+    {
+      if (!mysql->options.backwards_compatible_insecure_ssl)
+        my_set_error(mysql, CR_CONNECTION_ERROR, SQLSTATE_UNKNOWN,
+                     "Received error packet before completion of TLS handshake. "
+                     "Suppressing its details so that the client cannot vary its behavior "
+                     "based on this UNTRUSTED input.");
+      else
+      {
+        /* The server has sent an error packet before completion of the TLS handshake.
+         * The client wishes to use SSL, so it SHOULD NOT trust this packet, because
+         * it is trivial for a MITM attacker to inject or interfere with such packets.
+         *
+         * However, the client has explicitly opted in to accept servers which use
+         * TLS/SSL in a buggy and insecure way for backwards-compatibility, so we allow
+         * this to go through and use the error set by ma_net_safe_read(), with a warning.
+         */
+        fprintf(stderr,
+                "WARNING: Received error packet sent by server before completion of TLS\n"
+                "    handshake. This is insecure, but we allow it because client is configured\n"
+                "    with backwards-compatible-insecure-ssl.\n");
+      }
+    }
     else if (mysql->net.last_errno == CR_SERVER_LOST)
       my_set_error(mysql, CR_SERVER_LOST, SQLSTATE_UNKNOWN,
-                 ER(CR_SERVER_LOST_EXTENDED),
-                 "handshake: reading initial communication packet",
-                 errno);
+                   ER(CR_SERVER_LOST_EXTENDED),
+                   "handshake: reading initial communication packet",
+                   errno);
 
     goto error;
   }
@@ -1931,6 +1951,23 @@ restart:
     SET_CLIENT_ERROR(mysql, CR_SSL_CONNECTION_ERROR, SQLSTATE_UNKNOWN,
                      "Client requires TLS/SSL, but the server does not support it");
     goto error;
+  }
+  if (mysql->options.use_ssl &&
+      !(mysql->extension->mariadb_server_capabilities & (MARIADB_CLIENT_CAN_SEND_DUMMY_HANDSHAKE_PACKET >> 32)))
+  {
+    /* Unless the client has explicitly opted in to (backwards compatible insecure TLS/SSL),
+     * which leaks excessive information prior to the TLS handshake, then we should abort.
+     */
+    if (!mysql->options.backwards_compatible_insecure_ssl)
+    {
+      SET_CLIENT_ERROR(mysql, CR_SSL_CONNECTION_ERROR, SQLSTATE_UNKNOWN,
+                       "Client requires secure TLS/SSL, but server only supports old, buggy, insecure TLS/SSL. Specify backwards-compatible-insecure-ssl to override.");
+      goto error;
+    }
+    else
+      fprintf(stderr,
+              "WARNING: Server only supports old, buggy, insecure TLS/SSL, and client has\n"
+              "  opted to use this (backwards-compatible-insecure-ssl set)\n");
   }
 
   /* Set character set */
@@ -3559,6 +3596,9 @@ mysql_optionsv(MYSQL *mysql,enum mysql_option option, ...)
     break;
   case MYSQL_OPT_SSL_ENFORCE:
     mysql->options.use_ssl= (*(my_bool *)arg1);
+    break;
+  case MYSQL_OPT_BACKWARDS_COMPATIBLE_INSECURE_SSL:
+    mysql->options.backwards_compatible_insecure_ssl= (*(my_bool *)arg1);
     break;
   case MYSQL_OPT_SSL_VERIFY_SERVER_CERT:
     if (*(my_bool *)arg1)

@@ -223,6 +223,7 @@ extern const char *SQLSTATE_UNKNOWN;
     MYSQL_OPT_MAX_ALLOWED_PACKET,
     MYSQL_OPT_NET_BUFFER_LENGTH,
     MYSQL_OPT_TLS_VERSION,
+    MYSQL_OPT_BACKWARDS_COMPATIBLE_INSECURE_SSL,
 
     /* MariaDB specific */
     MYSQL_PROGRESS_CALLBACK=5999,
@@ -331,6 +332,7 @@ struct st_mysql_options {
     char *shared_memory_base_name;
     unsigned long max_allowed_packet;
     my_bool use_ssl;				/* if to use SSL or not */
+    my_bool backwards_compatible_insecure_ssl;
     my_bool compress,named_pipe;
     my_bool reconnect, unused_1, unused_2, unused_3;
     enum mysql_option methods_to_use;
